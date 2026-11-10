@@ -1,0 +1,16 @@
+layer,output_shape,parameters
+Conv2d,"(1, 32, 28, 28)",896
+BatchNorm2d,"(1, 32, 28, 28)",64
+ReLU,"(1, 32, 28, 28)",0
+MaxPool2d,"(1, 32, 14, 14)",0
+Conv2d,"(1, 64, 14, 14)",18496
+BatchNorm2d,"(1, 64, 14, 14)",128
+ReLU,"(1, 64, 14, 14)",0
+MaxPool2d,"(1, 64, 7, 7)",0
+Conv2d,"(1, 128, 7, 7)",73856
+BatchNorm2d,"(1, 128, 7, 7)",256
+ReLU,"(1, 128, 7, 7)",0
+AdaptiveAvgPool2d,"(1, 128, 1, 1)",0
+Flatten,"(1, 128)",0
+Dropout,"(1, 128)",0
+Linear,"(1, 7)",903

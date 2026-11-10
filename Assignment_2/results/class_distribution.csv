@@ -1,0 +1,8 @@
+class,label,train,val,test
+akiec,actinic keratoses and intraepithelial carcinoma,228,33,66
+bcc,basal cell carcinoma,359,52,103
+bkl,benign keratosis-like lesions,769,110,220
+df,dermatofibroma,80,12,23
+mel,melanoma,779,111,223
+nv,melanocytic nevi,4693,671,1341
+vasc,vascular lesions,99,14,29

@@ -1,0 +1,830 @@
+OPGAVE 2 MED DERMAMNIST
+Grundig forklaring af løsning, kode og metodevalg
+
+1. HVAD ER DER LAVET?
+
+Løsningen ligger i DermaMNIST_CNN_Assignment_2.ipynb. Det er en Jupyter-notebook,
+som kan køres celle for celle i eksempelvis VS Code eller Google Colab. Hele
+beregningsforløbet står i notebooken. Der er ikke et separat træningsbibliotek,
+som man også skal forstå for at følge løsningen.
+
+Notebooken indlæser DermaMNIST, undersøger data, forbehandler billederne,
+definerer en lille convolutional neural network-model, træner den og evaluerer
+den på det officielle testsæt. Undervejs gemmes tabeller, figurer, modelvægte
+og forsøgsindstillinger. Rapport.md følger opgavebeskrivelsens seks afsnit:
+Introduction, Materials, Methods, Results, Discussion og Conclusion.
+
+Denne fil forklarer både fremgangsmåden og begrundelserne. Rapporten er kortere
+og har fokus på det gennemførte forsøg. README.md beskriver opstarten, mens
+results/ indeholder de målte resultater og figurer. En ny kørsel overskriver
+resultatfilerne; den skrevne rapport opdateres ikke automatisk.
+
+Brug denne fil som jeres egne arbejdsnoter: Åbn de nævnte figurer og tabeller,
+mens I læser det tilhørende afsnit. Henvisningen results/filnavn betyder filen
+i undermappen results under Assignment_2, ved siden af denne forklaringsfil.
+I afsnit 22 er der en samlet oversigt og en foreslået læserækkefølge.
+
+PNG-filer er figurer, som I kan åbne direkte. CSV-filer indeholder tallene
+som rækker og kolonner, så I kan se værdierne bag figurerne. JSON-filen samler
+konfiguration og resultater som navngivne felter. PT-filen er den trænede
+models checkpoint og indlæses gennem PyTorch. PNG-billederne i results er
+visualiseringer fra forsøget; selve datasættet ligger i data/dermamnist.npz.
+
+Den officielle opgavebeskrivelse bruges til at fastlægge opgaven. PDF-guiden
+bruges som faglig støtte. Forslag om ResNet, transfer learning og Grad-CAM
+er ikke alle nødvendige for en enkel løsning. Derfor er der valgt én lille
+arkitektur og en begrænset søgning efter en passende learning rate.
+
+2. HVILKET PROBLEM LØSER MODELLEN?
+
+Input er et dermatoskopisk RGB-billede af en hudlæsion. Output er én af syv
+klasser. Modellen skal klassificere hele billedet, ikke finde læsionens
+placering eller tegne en afgrænsning rundt om den.
+
+Der er én sand klasse pr. billede. Opgaven er derfor multiclass classification.
+Det adskiller sig fra multilabel classification, hvor samme billede kan have
+flere uafhængige labels. Derfor bruger modellen syv logits og cross-entropy,
+ikke syv uafhængige sigmoid-output med binary cross-entropy.
+
+Klasserne og forkortelserne i figurerne er:
+0 / akiec: actinic keratoses and intraepithelial carcinoma.
+1 / bcc: basal cell carcinoma.
+2 / bkl: benign keratosis-like lesions.
+3 / df: dermatofibroma.
+4 / mel: melanoma.
+5 / nv: melanocytic nevi.
+6 / vasc: vascular lesions.
+
+De fulde klassenavne hentes fra MedMNISTs INFO i numerisk rækkefølge. Vi
+ændrer ikke labelnumrene. Forsøget handler om alle syv kategorier. En høj
+samlet score er derfor ikke det samme som en god model til at finde melanomer.
+Det kræver også særskilt analyse af recall og forvekslinger for mel-klassen.
+
+3. HVORFOR DERMAMNIST OG 28 GANGE 28 PIXELS?
+
+DermaMNIST bygger på HAM10000. Vi bruger MedMNIST-udgaven med 10.015 billeder:
+7.007 til træning, 1.003 til validering og 2.005 til test. Billederne har tre
+farvekanaler og indlæses som arrays med formen (N, 28, 28, 3).
+
+28 x 28 er valgt, så træningen kan køres på CPU. Et 224 x 224-billede har
+64 gange så mange pixels. Det påvirker især beregninger og aktiveringer i
+tidlige konvolutionslag, selv hvis antallet af filtre holdes fast.
+
+Den lave opløsning betyder, at fine mønstre og strukturer kan gå tabt. Det
+er en metodebegrænsning. Hvis et lille billede skaleres op, kommer de tabte
+detaljer ikke tilbage. Et senere forsøg med højere opløsning bør beskrive,
+hvor den ekstra oprindelige billedinformation kommer fra.
+
+En CNN fra bunden er lettere at forklare ud fra undervisningens konvolutioner,
+ReLU, pooling, backpropagation og regularisering. Forsøget viser ikke, at
+transfer learning ville være dårligere; det er blot ikke undersøgt her.
+
+4. TRÆNING, VALIDERING OG TEST HAR FORSKELLIGE ROLLER
+
+Træningsdata bruges til gradientopdateringer, normaliseringsværdier og
+klassevægte. De sidste to oplysninger er en del af den tilpassede pipeline
+og skal derfor bestemmes uden at bruge validerings- eller testfordelingen.
+
+Valideringsdata bruges til at vælge learning rate og den bedste epoch.
+Modellen får ingen gradientopdateringer fra disse billeder. De påvirker
+alligevel modelvalget, så valideringsresultatet er ikke en uafhængig sluttest.
+
+Testdata indlæses først, når modelvalget er afsluttet. CNN'en køres én gang
+over alle testbilleder. De gemte forudsigelser genbruges til mål, confusion
+matrix, ROC-kurver og fejlbilleder. Disse analyser kræver ikke ny træning
+eller en ny modelkørsel. Vi ændrer ikke modellen efter at have set testen.
+
+MedMNIST downloader én NPZ-fil med alle splits. At testdata ligger i den
+lokale fil er ikke i sig selv brug af testdata til træning. Det afgørende
+er, hvilke oplysninger koden anvender til opdateringer og metodevalg.
+Vi bevarer de officielle splits frem for at lave en ny tilfældig opdeling.
+
+Vigtig begrænsning ved datasættet:
+Abhishek, Jain og Hamarneh dokumenterer i 2025 overlap af billeder af samme
+læsion mellem DermaMNISTs officielle splits. Standardtesten kan derfor give
+et optimistisk indtryk af generalisering til nye læsioner. Vores adskillelse
+af modelvalg og test reparerer ikke datasættets eksisterende overlap.
+
+NPZ-filen giver ikke nødvendige læsions- eller patient-id'er til en sikker
+grupperet opdeling direkte her. Vi påstår derfor ikke patientuafhængighed.
+Et forsøg på korrigerede eller eksterne splits skal beskrives separat og
+kan ikke uden videre sammenlignes med dette standardbenchmark.
+
+5. INDLEDENDE ANALYSE AF KLASSEFORDELING OG BILLEDER
+
+Træningssættet indeholder 228 akiec, 359 bcc, 769 bkl, 80 df, 779 mel,
+4.693 nv og 99 vasc. Nv udgør cirka 67 procent. En model kan altså opnå en
+tilsyneladende rimelig accuracy ved næsten kun at sige nv. Det løser ikke
+opgaven med at skelne alle syv klasser.
+
+Ubalancen begrunder klassevægtet tab, valg efter macro-F1 og evaluering med
+flere mål end accuracy. Fordelingen vises som et søjlediagram og gemmes.
+
+Åbn results/class_distribution.png, mens I læser dette. X-aksen viser de
+syv klasser fra afsnit 2, og y-aksen viser antal træningsbilleder. Den høje
+nv-søjle viser de 4.693 billeder, mens df-søjlen kun når 80. Figuren forklarer
+altså en egenskab ved inputdata, ikke hvor godt modellen klarer sig.
+
+De præcise optællinger findes i results/class_distribution.csv. Hver række
+er en klasse. class er forkortelsen, label er det fulde navn, og train,
+val og test er antal billeder i hvert split. Rækken for df indeholder
+eksempelvis 80, 12 og 23. Det er værd at huske, når I senere vurderer
+modellens df-resultat: Der er kun 23 testbilleder bag det.
+
+Der vises tre tilfældigt valgte træningsbilleder fra hver klasse med et fast
+seed. De bruges til at undersøge variation i farve, størrelse, kontrast og
+baggrund samt lighed mellem forskellige klasser. Visuel analyse giver
+hypoteser om vanskelige klasser, men beviser ikke modellens beslutningsgrundlag.
+Testfejl vises først efter endelig evaluering.
+
+Disse eksempler ligger i results/sample_images.png. Hver kolonne er én
+klasse, og de tre billeder nedenunder er tre forskellige træningseksempler
+fra den klasse. Sammenlign først billeder inden for samme kolonne for at
+se variation inden for klassen. Sammenlign derefter eksempelvis mel og nv
+for at se ligheder mellem klasser. De store pixels skyldes opløsningen
+28 x 28; de er ikke en fejl i figuren. Billederne vises i deres originale
+farveskala før standardisering og er ikke augmentationseksempler.
+
+6. PIXELFORBEHANDLING OG NORMALISERING
+
+Originale pixels er uint8-heltal fra 0 til 255. ToTensor skalerer dem til
+flydende tal mellem 0 og 1 og flytter kanaldimensionen:
+Fra (28, 28, 3) til (3, 28, 28). En batch har formen (B, 3, 28, 28).
+
+At dividere med 255 giver [0, 1], ikke [-1, 1]. Derefter standardiseres hver
+RGB-kanal med z = (x - mean) / std. De tre mean og tre std beregnes kun på
+træningspixels efter skalering til [0, 1]. De samme værdier anvendes derefter
+på alle splits. Validerings- og testdata tilpasser dermed ikke inputskalaen.
+
+Standardisering begrænser ikke nødvendigvis værdierne til [-1, 1]. Værdier
+langt fra nul er tilladt. Det vigtige er, at præcis den samme beregning
+anvendes under træning og senere brug.
+
+Vi bruger ikke ImageNet-statistik, fordi modellen trænes fra bunden på
+DermaMNIST. Prætrænede vægte kan have andre krav til forbehandlingen.
+
+I results/metrics.json findes de konkrete værdier under config i felterne
+normalization_mean og normalization_std. Rækkefølgen er rød, grøn, blå.
+Tallene er opskriften på den samme forbehandling ved senere modelbrug;
+de er ikke modelpræstationer eller værdier, I skal beregne igen på testen.
+
+7. DATA AUGMENTATION
+
+Træningsbilleder spejles tilfældigt vandret og lodret, hver med p = 0,5.
+De to valg er uafhængige og trækkes igen ved indlæsning. En hudlæsions klasse
+bestemmes ikke af billedets retning. Spejlinger kan derfor mindske afhængighed
+af bestemte orienteringer og begrænse overfitting.
+
+Vi bruger ikke kraftige farveændringer eller beskæring. Farve og læsionens
+afgrænsning kan være relevante signaler. Spejling kræver heller ikke den
+interpolation, som vilkårlige rotationer kan introducere.
+
+Validerings- og testdata får kun ToTensor og Normalize. Dermed afhænger
+evaluering ikke af tilfældige transformationer. Test-time augmentation er
+ikke undersøgt i dette forsøg.
+
+8. HVORFOR EN CNN?
+
+Et udfladet RGB-billede har 2.352 værdier. Et fuldt forbundet netværk kan
+arbejde med disse tal, men har ikke samme direkte antagelse om lokale
+mønstre og vægtdeling. En konvolution undersøger små områder med de samme
+lærte filtre på forskellige positioner. Den behøver ikke en helt ny
+vægtgruppe for hver placering af et mønster.
+
+Tidlige lag kan finde simple farve- og strukturændringer. Senere lag kan
+kombinere deres output. Data afgør, hvilke mønstre der faktisk læres. Det
+kan ikke udledes fra arkitekturen alene, at et bestemt filter finder hår,
+pigmentnetværk eller en anden klinisk relevant struktur.
+
+Konvolutioner bevarer rumlig struktur og giver en vis translationsækvivarians.
+Pooling kan mindske følsomhed over for placering. Det betyder ikke, at
+netværket er fuldstændig invariant over for alle forskydninger og rotationer.
+
+9. ARKITEKTUREN TRIN FOR TRIN
+
+B er batchstørrelsen. Forløbet gennem modellen er:
+
+Input:                              B x   3 x 28 x 28.
+Conv2d 3 -> 32, 3 x 3, padding 1:    B x  32 x 28 x 28.
+BatchNorm, ReLU og MaxPool2d(2):     B x  32 x 14 x 14.
+Conv2d 32 -> 64, 3 x 3, padding 1:   B x  64 x 14 x 14.
+BatchNorm, ReLU og MaxPool2d(2):     B x  64 x  7 x  7.
+Conv2d 64 -> 128, 3 x 3, padding 1:  B x 128 x  7 x  7.
+BatchNorm og ReLU:                  B x 128 x  7 x  7.
+AdaptiveAvgPool2d(1):                B x 128 x  1 x  1.
+Flatten og Dropout(0.3):             B x 128.
+Linear 128 -> 7:                    B x   7.
+
+Et konvolutionslags rumlige outputstørrelse er:
+floor((input + 2 * padding - kernel_size) / stride) + 1.
+
+Kernel_size = 3, padding = 1 og stride = 1 bevarer størrelse. Max pooling
+med kerne og stride på 2 halverer 28 til 14 og 14 til 7. Kun to poolings
+bruges, så de små billeder ikke reduceres for kraftigt for tidligt.
+
+De 32, 64 og 128 filtre giver mulighed for flere forskellige kombinationer
+af egenskaber i senere lag, mens den rumlige størrelse bliver mindre.
+Arkitekturen er valgt på forhånd; lagantal og kanalantal er ikke tunet.
+
+BatchNorm2d har en lærbar skala og forskydning pr. kanal. Under træning
+bruges batchstatistik, og løbende statistik opdateres. Under evaluering
+bruges værdier opbygget under træningen. Det er en vigtig grund til at
+skifte korrekt mellem model.train() og model.eval(). Batch normalization
+erstatter ikke normalisering af input; de virker forskellige steder.
+
+ReLU beregner max(0, x). Den giver ikke-linearitet, så flere lag kan lære
+mere end én samlet lineær transformation, og er billig at beregne.
+
+Max pooling vælger største aktivering i hvert 2 x 2-område. Det reducerer
+beregninger, men mister også information. Global average pooling beregner
+gennemsnittet af hvert af de 128 feature maps på 7 x 7 pixels.
+
+Uden global pooling ville udfladning give 128 * 7 * 7 = 6.272 features.
+Et direkte lag med syv output ville da have 43.911 parametre. Med global
+pooling har det sidste lag kun 128 * 7 + 7 = 903. Hele modellen har
+94.599 trænérbare parametre. Notebooken beregner selv antallet og gemmer
+en tabel med outputdimensioner og parametre for hvert lag.
+
+Åbn results/architecture.csv for at følge dette forløb i koden. Kolonnen
+layer er lagtypen, output_shape er tensorens form efter laget, og parameters
+er antal trænérbare parametre i laget. Første dimension er 1 i filen, fordi
+tabellen er lavet ved at sende ét prøvebillede gennem modellen. Under
+træning erstattes den dimension af den aktuelle batchstørrelse.
+
+Første Conv2d-række har output_shape (1, 32, 28, 28) og 896 parametre.
+Første MaxPool2d-række ændrer formen til (1, 32, 14, 14), men har nul
+parametre. Det viser forskellen på at udføre en beregning og at have noget,
+der skal læres. Summen af parameters-kolonnen er modellens 94.599 parametre.
+Tabellen beskriver arkitekturen; den indeholder ikke de lærte vægtværdier.
+
+Under træning sætter dropout tilfældigt 30 procent af de 128 features til
+nul og skalerer de resterende efter PyTorchs definition. Under evaluering
+er dropout deaktiveret. Det begrænser afhængighed af enkelte features.
+
+10. LOGITS, SOFTMAX OG LABELFORM
+
+Det sidste lag producerer syv rå tal pr. billede: logits. De behøver ikke
+ligge mellem 0 og 1 eller summere til 1. Softmax omsætter dem til:
+p_c = exp(z_c) / sum_j(exp(z_j)). Disse værdier summerer til 1.
+
+CrossEntropyLoss forventer rå logits og håndterer internt en numerisk stabil
+beregning svarende til log-softmax og negative log-likelihood. Derfor sættes
+der ikke softmax ind før tabet. Ved evaluering beregnes softmax til ROC-AUC
+og til de gemte klassescores. Argmax vælger den største score; den valgte
+klasse er den samme ved argmax på logits eller på softmax-output.
+
+MedMNIST giver labels med formen (B, 1). CrossEntropyLoss forventer her
+(B,) med heltal. labels.reshape(-1).long() sikrer dette, også ved en batch
+med kun ét billede. Ubegrænset squeeze() kunne da fjerne for mange dimensioner.
+
+11. CROSS-ENTROPY OG KLASSEVÆGTE
+
+For et billede med sand klasse y er uvægtet tab L = -log(p_y). Høj score
+til rigtig klasse giver lille tab. Meget lav score giver stort tab.
+Vi minimerer dette differentiable tab, ikke accuracy eller F1 direkte,
+fordi de sidstnævnte afhænger af diskrete klassevalg.
+
+Klassevægten er w_c = N / (K * n_c). Her er N = 7.007, K = 7 og n_c
+antal træningsbilleder i klassen. Vægten for nv er cirka 0,213, mens df
+har cirka 12,512. En tilsvarende fejl på df får dermed større direkte
+vægt i tabet end en fejl på nv.
+
+Over hele træningssættet gælder n_c * w_c = N / K. Hver klasse har samme
+samlede vægt i den vægtede sum før forskelle i billedtab. Det betyder ikke,
+at hver batch bliver balanceret, eller at recall bliver ens for alle klasser.
+
+Fordelen er mere opmærksomhed på sjældne klasser. Ulempen er større indflydelse
+til få sjældne eller fejlmærkede billeder. Metoden kan øge falske positive
+og reducere accuracy. Den vælges ud fra træningsfordelingen, men dens isolerede
+effekt undersøges ikke med et separat uvægtet CNN-forsøg.
+
+Der bruges ikke også vægtet sampling. Kombinationen ville ændre balanceringen
+og gøre det mindre tydeligt, hvilken metode der er undersøgt.
+
+12. KORREKT AGGREGERING AF TAB OVER BATCHES
+
+CrossEntropyLoss oprettes med reduction='sum'. Batchens vægtede sum divideres
+med summen af klassevægte for de labels, der faktisk er i batchen. Det svarer
+til PyTorchs vægtede mean-reduktion for klasselabels uden label smoothing.
+
+For en hel epoch gemmes begge summer, så:
+epoch loss = sum af vægtede billedtab / sum af billeders klassevægte.
+
+Et simpelt gennemsnit af batchgennemsnit ville generelt være forkert: sidste
+batch kan være mindre, og batches kan have forskellig samlet klassevægt.
+Samme tabsdefinition bruges til træning og validering.
+
+Træningstabet opsamles dog fra løbende modeltilstande under opdateringerne.
+Valideringstabet måles efter epochen med en fast tilstand. Måleforholdene
+er derfor ikke helt identiske, selv om tabsdefinitionen er den samme.
+
+13. ADAMW OG GRADIENTOPDATERING
+
+AdamW er en standardoptimizer, som tilpasser opdateringer ud fra gradienternes
+historik. Opgavens fokus er CNN-metoden, så optimizeren implementeres ikke
+fra bunden. Hver træningsbatch udfører:
+
+optimizer.zero_grad(): ryd gradienterne fra forrige batch.
+model(images): beregn logits med forward pass.
+criterion: beregn vægtet tab.
+loss.backward(): beregn gradienter med backpropagation.
+optimizer.step(): opdater modellens parametre.
+
+Uden zero_grad ville gradienter akkumulere mellem batches. Det er ikke
+meningen i dette forsøg. torch.set_grad_enabled(False) slår gradient-
+beregning fra under evaluering. model.eval() er stadig nødvendigt, fordi
+BatchNorm og dropout ellers ville opføre sig som under træning.
+
+Weight decay er 0,0001. Det trækker parametre mod mindre værdier og kan
+begrænse overfitting. I AdamW er det adskilt fra den adaptive gradient-
+opdatering. Det er ikke blot et ekstra L2-led inde i cross-entropy med Adam.
+Det udskrevne datatab får derfor ikke automatisk lagt et ekstra strafled
+til, fordi AdamW har weight_decay slået til.
+
+14. KONTROLLER FØR DET EGENTLIGE FORSØG
+
+Koden kontrollerer billedform, datamængder, at alle træningsklasser findes,
+og at ét billede giver output med formen (1, 7).
+
+Initialt uvægtet tab sammenholdes med ln(7), cirka 1,946. Hvis alle klasser
+får præcis sandsynlighed 1/7, er tabet ln(7) uanset label. Tilfældige logits
+er ikke nødvendigvis ens, så sammenligningen er en plausibilitetskontrol,
+ikke et krav om præcis lighed.
+
+En separat CNN får fire træningsbilleder fra hver klasse, altså 28 i alt.
+Den trænes i 200 opdateringer med learning rate 0,003 uden augmentation,
+dropout eller weight decay. Derefter skal den kunne klassificere mindst
+95 procent af de samme 28 billeder korrekt.
+
+Her er overfitting tilsigtet: kontrollen skal opdage fejl i tensorformer,
+labels og gradientforløb. Den siger intet om generalisering. Kontrolmodellen
+kasseres, og de egentlige kandidater initialiseres fra bunden. Kontrollen
+bruger hverken validerings- eller testdata.
+
+15. HYPERPARAMETRE OG EARLY STOPPING
+
+Learning rates 0,001 og 0,0003 afprøves med samme model, seed, augmentation,
+klassevægte, batch size 128, dropout 0,3, weight decay 0,0001 og maksimalt
+30 epochs. Learning rate er konstant inden for hvert forsøg. En scheduler
+er fravalgt for at begrænse antallet af metodevalg.
+
+En epoch besøger alle træningsbilleder én gang. DataLoader blander trænings-
+rækkefølgen, men ikke validerings- eller testrækkefølgen. num_workers=0 undgår
+ekstra processer og er tilstrækkeligt til denne lille datamængde.
+
+Efter hver epoch beregnes validerings-macro-F1. Ved en forbedring gemmes en
+deepcopy af state_dict og epochnummeret. En almindelig reference ville kunne
+ændre sig under senere træning; deepcopy bevarer checkpointets værdier.
+
+Efter otte epochs uden forbedring stopper træningen. Det er early stopping
+med patience = 8. Bagefter gendannes vægtene fra den bedste epoch. Den af de
+to kandidater med bedst validerings-macro-F1 vælges til test. Ved præcis
+lighed beholdes den kandidat, som blev undersøgt først.
+
+Den begrænsede søgning gør forsøget overskueligt. Den viser ikke en globalt
+optimal learning rate. Arkitektur, billedopløsning, augmentation, dropout
+og weight decay er ikke optimeret systematisk.
+
+Modelvalget kan læses direkte i results/tuning_results.csv. Der er én række
+pr. learning rate. learning_rate er den afprøvede værdi, epochs_run er antal
+gennemførte epochs, og best_epoch er det checkpoint, som blev gendannet.
+val_macro_f1, val_accuracy og val_loss gælder ved netop best_epoch, ikke
+nødvendigvis ved den sidste epoch. seconds er tid for kandidatens træning
+og løbende validering; det er ikke tiden for én epoch.
+
+Rækken for 0,001 viser best_epoch = 28, epochs_run = 30 og val_macro_f1
+cirka 0,4552. Rækken for 0,0003 viser henholdsvis 12, 20 og cirka 0,4017.
+Derfor valgte vi 0,001. Hvis I kun læste val_accuracy, ville den anden
+kandidat se bedre ud ved sit bedste checkpoint. Det er et godt eksempel
+på, hvorfor kriteriet til modelvalg skal være besluttet på forhånd.
+
+16. SEEDS OG REPRODUCERBARHED
+
+Seed 42 sættes for Python, NumPy og PyTorch. Seed og DataLoader-generator
+nulstilles ved hver learning rate. Kandidaterne starter dermed med samme
+vægtinitialisering og tilsvarende tilfældighedsforløb. Et forsøg, der stoppes
+tidligere, har naturligvis ikke lige så mange efterfølgende epochs.
+
+Hvis CUDA er tilgængeligt, sættes også CUDA-seed og deterministiske cuDNN-
+indstillinger. Ellers bruges CPU. Højst fire CPU-tråde anvendes, så det
+lille netværk ikke spreder arbejdet unødigt på mange tråde.
+
+Faste seeds og gemte versioner letter gentagelse, men garanterer ikke
+identiske resultater på forskellige maskiner og softwareversioner. Derfor
+gemmes platform, Python, pakkeversioner og device med forsøgsresultaterne.
+Der er kun én seed. En lille forskel mellem kandidaterne er derfor ikke
+dokumentation for en statistisk sikker eller generel metodefordel.
+
+Find de gemte indstillinger i results/metrics.json under config: seed,
+device, python, platform og versions. selected_learning_rate og selected_epoch
+viser, hvilket forsøg og checkpoint der blev valgt. De er nyttige, når I
+vil forbinde filerne med den konkrete kørsel, I forklarer.
+
+17. FORTOLKNING AF TRÆNINGSKURVER
+
+Der gemmes kurver for loss, accuracy og macro-F1 på træning og validering
+for den valgte learning rate. En lodret linje markerer den valgte epoch.
+En separat figur sammenligner begge learning rates på validerings-macro-F1.
+
+Den første figur er results/training_curves.png. Dens tre paneler viser
+fra venstre vægtet cross-entropy, accuracy og macro-F1. X-aksen er epoch.
+Kurven train er træningsmålet, og val er valideringsmålet. Tab skal som
+udgangspunkt falde, mens accuracy og macro-F1 gerne skal stige. Den lodrette
+stiplede linje ved epoch 28 viser det valgte checkpoint. Figuren viser
+learning rate 0,001; den viser ikke testresultater eller begge kandidater.
+
+Tallene bag kurverne ligger i results/history_lr_0.001.csv. Hver række er
+én epoch. train_loss, train_accuracy og train_macro_f1 gælder træning;
+val_loss, val_accuracy og val_macro_f1 gælder validering. Rækken med epoch 28
+har eksempelvis train_macro_f1 cirka 0,4336 og val_macro_f1 cirka 0,4552.
+Der er 30 rækker, selv om det valgte checkpoint er fra epoch 28.
+
+Det andet forsøgs historik ligger i results/history_lr_0.0003.csv. Den har
+20 rækker, fordi early stopping afsluttede forsøget dér. Den bedste epoch
+er 12. Filnavnets 0.0003 er learning rate med punktum som decimaltegn.
+
+Figuren results/validation_comparison.png bruger begge historikfiler og
+viser kun deres val_macro_f1-kolonner. Den blå kurve er learning rate 0,001,
+og den orange er 0,0003. Kig på kurvernes højeste punkter for at forstå
+modelvalget; sammenlign ikke kun deres sidste punkter. Den orange kurve
+slutter ved epoch 20, fordi forsøget stoppede, ikke fordi de efterfølgende
+værdier er nul eller mangler ved en fejl.
+
+Faldende træningstab og stigende valideringstab over flere epochs kan tyde
+på overfitting. En enkelt dårlig epoch er ikke nok til den konklusion.
+Macro-F1 kan svinge kraftigt, blandt andet fordi små valideringsklasser har
+få billeder. Se både kurvernes udvikling og størrelsen på udsvingene.
+
+Træningsmål måles med augmentation, dropout og løbende vægtopdateringer.
+Valideringsmål måles uden augmentation og dropout efter hver epoch. Derfor
+kan valideringsmål nogle gange være bedre end træningsmål uden en kodefejl.
+En helt ens sammenligning ville kræve en særskilt måling på uændrede
+træningsbilleder med model.eval(); det udføres ikke her.
+
+Den bedste checkpoint-epoch vælges efter macro-F1, ikke efter mindst tab.
+Tab afhænger af scores, mens F1 afhænger af argmax-klasser. Derfor kan de
+to kriterier pege på forskellige epochs.
+
+18. MAJORITETSBASELINE
+
+Baselinen finder den hyppigste klasse i træningsdata og siger derefter nv
+for alle testbilleder. Den bruger ingen billedinformation. Den viser, hvad
+man kan opnå ved kun at udnytte ubalancen.
+
+Vi sammenligner accuracy, balanced accuracy og macro-F1. En CNN med lavere
+accuracy kan stadig fordele korrekte forudsigelser bedre mellem klasserne.
+Det er netop, hvad den konkrete kørsel viser. Det skal forklares åbent,
+ikke skjules ved kun at vise de mål, hvor CNN'en er bedst.
+
+Majoritetsklassen bestemmes før testen ud fra træningsfordelingen. Den
+vælges ikke efter, hvilken konstant forudsigelse der ville virke bedst
+på testsættet. Der beregnes ikke en sandsynlighedsbaseret AUC for baselinen;
+de tre rapporterede mål er tilstrækkelige til denne reference.
+
+I results/metrics.json står CNN'ens samlede testmål under test og baselinens
+under baseline. Når I sammenligner, skal I læse det samme feltnavn begge
+steder: eksempelvis macro_f1 over for macro_f1. Feltet tuning indeholder
+valideringsresultater og skal ikke forveksles med den endelige test.
+
+19. ACCURACY, RECALL, PRECISION OG F1
+
+Accuracy er antal rigtige forudsigelser divideret med antal billeder. Hvert
+billede tæller lige meget, så den største klasse påvirker målet mest.
+
+For hver klasse behandles den som positiv og de øvrige seks som negative:
+TP: sand klasse og forudsagt klasse er begge den pågældende klasse.
+FN: billedet tilhører klassen, men modellen vælger en anden.
+FP: billedet tilhører en anden klasse, men modellen vælger denne klasse.
+TN: billedet tilhører en anden klasse, og modellen vælger ikke denne klasse.
+
+Recall = TP / (TP + FN). Det kaldes også sensitivitet og viser, hvor stor
+en del af klassens sande billeder der findes. Lav recall for mel betyder,
+at mange melanombilleder fordeles til andre klasser i dette datasæt.
+
+Precision = TP / (TP + FP). Det kaldes også positiv prædiktiv værdi og viser,
+hvor stor en del af modellens forudsigelser for klassen der er korrekte.
+
+F1 = 2 * precision * recall / (precision + recall). Det harmoniske gennemsnit
+er lavt, hvis enten precision eller recall er lav. Derfor vises også de
+to komponenter, så man kan se, hvad der driver F1.
+
+Macro-F1 er gennemsnittet af de syv klassers F1. Hver klasse tæller lige
+meget uanset størrelse. Det er ikke det samme som at tage F1 af gennemsnitlig
+precision og recall. Det er vores hovedmål til valg af model.
+
+Balanced accuracy er gennemsnittet af de syv klassers recall. En model, der
+altid siger nv, får 1/7: recall er 1 for nv og 0 for resten. Målet viser
+derfor et problem, som kan være skjult bag relativt høj accuracy.
+
+Hvis modellen aldrig forudsiger en klasse, bliver precision matematisk
+udefineret på grund af nulnævner. zero_division=0 får scikit-learn til at
+sætte værdien til nul. Klassen indgår stadig i macro-gennemsnittet.
+
+Åbn results/per_class_metrics.csv til forklaringerne i dette afsnit og
+afsnit 20. Hver række er en klasse. precision, recall og f1 er målene
+ovenfor. support er antal sande testbilleder i klassen, ikke hvor mange
+gange modellen forudsiger den. Tallene er mellem 0 og 1: 0.6771 svarer
+til cirka 67,71 procent, ikke 0,6771 procent.
+
+Læs for eksempel rækken mel: support er 223, recall er cirka 0,6771, og
+precision er cirka 0,3186. Modellen finder 151 af de 223 sande mel-billeder,
+men kun cirka 32 procent af alle dens mel-forudsigelser er korrekte. Det
+er to forskellige spørgsmål, og begge dele er nødvendige for at forstå
+denne klasses resultat. Kig også på df-rækken, hvor support kun er 23.
+
+20. SPECIFICITET, ROC-AUC OG KAPPA
+
+Specificitet = TN / (TN + FP). Det viser, hvor godt modellen undgår at
+tildele klassen til de andre klassers billeder. En sjælden klasse kan have
+høj specificitet samtidig med lav recall. Læs derfor målene sammen.
+
+ROC bruger softmax-scoren for én klasse mod alle andre. En tænkt tærskel
+varieres for at beregne true positive rate = TP/(TP+FN) og false positive
+rate = FP/(FP+TN). AUC er arealet under kurven og beskriver rangordning.
+
+Macro-AUC er gennemsnittet af de syv one-vs-rest AUC-værdier. Alle klasser
+forekommer i testen, så de syv AUC-værdier kan beregnes. En høj AUC er ikke
+det samme som høj accuracy ved argmax. Det er også muligt at have gode
+rangordningsscores uden kalibrerede sandsynligheder.
+
+Åbn results/roc_curves.png. X-aksen er false positive rate, og y-aksen er
+true positive rate. Hver farvet kurve gælder én klasse mod de øvrige seks.
+En kurve tæt på øverste venstre hjørne viser god adskillelse mellem klassens
+billeder og resten. Den stiplede diagonal er reference for tilfældig
+rangordning; den er ikke den majoritetsbaseline, som vi bruger til accuracy.
+
+Forklaringen i figuren viser AUC pr. klasse: vasc er cirka 0,987, mens mel
+er cirka 0,851. De præcise tal findes i auc_ovr-kolonnen i
+results/per_class_metrics.csv. Specificitet står i specificity-kolonnen.
+Figurens titel viser gennemsnittet 0,913; i results/metrics.json findes
+det under test som macro_auc_ovr. På den måde kan I gå fra figurens kurver
+til de konkrete klassetal og derefter til det samlede gennemsnit.
+
+En score på 0,8 dokumenterer derfor ikke 80 procent klinisk sikkerhed.
+Rangordning, valg af klasse og sandsynlighedskalibrering er forskellige
+egenskaber. Vi har ikke gennemført en kalibreringsundersøgelse.
+
+Cohens kappa er (observeret enighed - forventet enighed) / (1 - forventet
+enighed). Forventet enighed beregnes ud fra fordelingen af sande og forudsagte
+klasser. Kappa er supplerende og erstatter ikke en analyse af klassefejl.
+
+Precision afhænger af klasseforekomst. Både denne og recall og specificitet
+kan ændre sig ved en anden patientgruppe eller billedkilde. Vi antager ikke,
+at benchmarkmål automatisk overføres til andre klinikker.
+
+21. CONFUSION MATRIX OG KVALITATIV FEJLANALYSE
+
+Rækkerne er sande klasser, kolonnerne er forudsagte klasser. Diagonalen er
+korrekte svar. Rækken mel og kolonnen nv tæller melanombilleder, der kaldes nv.
+
+Den ene matrix viser antal, den anden andelen af hver sand klasse. Hver
+normaliseret række summerer til 1, og diagonalværdierne svarer til recall.
+Denne udgave synliggør problemer i små klasser, som fylder lidt i rå antal.
+
+De to udgaver ligger side om side i results/confusion_matrices.png. Til
+venstre står antal billeder, til højre andelen inden for den sande klasse.
+Find for eksempel rækken nv og kolonnen mel: Til venstre står 274, og til
+højre cirka 0,20. Det betyder, at 274 af de 1.341 sande nv-billeder blev
+kaldt mel, altså cirka 20 procent. Det siger ikke, at 20 procent af alle
+modellens mel-forudsigelser er nv; det ville kræve en anden normalisering.
+
+Se også diagonalen for mel. Der står 151 til venstre og cirka 0,68 til
+højre. Regnestykket er 151 / 223, altså den recall på cirka 0,6771, som
+I også kan finde i results/per_class_metrics.csv. Dermed viser matrixen
+ikke en ny måling, men en anden måde at læse de samme forudsigelser på.
+Råmatrixen findes desuden i results/metrics.json under confusion_matrix
+med samme klasseorden som afsnit 2.
+
+De fem hyppigste forvekslinger udskrives efter antal. Det kan give en anden
+prioritering end fejlprocent pr. klasse. Begge perspektiver er relevante.
+
+Der vises op til to fejl pr. sand klasse i fast datasætrækkefølge. Vi vælger
+altså ikke manuelt de mest overbevisende eksempler. De får sand klasse,
+forudsagt klasse og score. Visuel lighed giver mulige forklaringer, men
+beviser ikke, hvilke features netværket brugte. Grad-CAM og anden feature
+attribution er ikke implementeret i denne enkle løsning.
+
+Åbn results/misclassified_examples.png for at se disse fejl. Billederne
+viser den sande klasse under Sand, modellens valg under Valgt og den valgte
+klasses softmax-score under p. Sand: nv, Valgt: mel, p = 0.56 betyder
+eksempelvis, at et nv-billede fejlagtigt får mel som højeste score med
+cirka 0,56. Kig på billedet for at overveje mulige vanskeligheder, men
+husk, at vi ikke kan udlede modellens begrundelse direkte af udseendet.
+
+Alle forudsigelser, både rigtige og forkerte, ligger i
+results/test_predictions.csv. Hver af de 2.005 rækker svarer til ét
+testbillede. true_label er facit, predicted_label er modellens valg, og
+prob_akiec til prob_vasc er de syv softmax-scores. Den højeste af disse
+scores bestemmer predicted_label. test_index tæller fra 0 og identificerer
+billedets placering i det officielle testsæt, ikke en patient.
+
+Første datarække har test_index = 0, true_label = 5 og predicted_label = 4.
+Slå numrene op i afsnit 2: Det er nv, der bliver kaldt mel. prob_mel er
+cirka 0,558, mens prob_nv er cirka 0,377. Rækken forklarer altså et af
+figurens nv -> mel-eksempler med p afrundet til 0,56. Filtrér rækker,
+hvor true_label og predicted_label er forskellige, hvis I vil undersøge
+alle fejl; figuren viser kun et lille udvalg af dem.
+
+22. GEMTE FILER OG GENBRUG AF MODELLEN
+
+Her er alle de 16 filer i results, samlet som en guide til jeres egen
+gennemgang. Flere af filerne viser de samme oplysninger i forskellige
+former. Kurver er gode til overblik, og CSV-filer giver de præcise tal.
+Der er altså ikke trænet en ny model for hver figur eller tabel.
+
+DATA OG EKSEMPLER: START HER
+
+results/class_distribution.png
+Søjlediagram over træningsklassernes størrelse. Se afsnit 5 for, hvordan
+figuren begrunder klassevægte og valg af evalueringsmål.
+
+results/class_distribution.csv
+Optælling pr. klasse for train, val og test. Brug den, hvis I vil vide,
+hvor mange billeder en måling bygger på. Se afsnit 5.
+
+results/sample_images.png
+Tre originale træningseksempler pr. klasse. Brug den til at forstå inputdata
+og overveje forskelle inden for og mellem klasser. Se afsnit 5.
+
+MODELLEN OG DENS TRÆNING
+
+results/architecture.csv
+Lag for lag: lagtype, outputform og antal trænérbare parametre. Følg
+tensorernes størrelser i afsnit 9, mens I læser tabellen.
+
+results/tuning_results.csv
+Én række pr. learning rate med kandidatens bedste valideringsresultat,
+valgte epoch, antal kørte epochs og tid. Forklarer modelvalget i afsnit 15.
+
+results/history_lr_0.001.csv
+Alle 30 epochs fra forsøget med learning rate 0,001. Én række pr. epoch
+med train- og val-mål. Værdierne bag training_curves.png. Se afsnit 17.
+
+results/history_lr_0.0003.csv
+Alle 20 epochs fra forsøget med learning rate 0,0003. Brug den til at
+se forløbet frem mod early stopping og checkpointet fra epoch 12.
+
+results/training_curves.png
+Tre paneler med tab, accuracy og macro-F1 for den valgte learning rate.
+Viser udviklingen under træning, ikke den endelige test. Se afsnit 17.
+
+results/validation_comparison.png
+Begge learning rates sammenlignet på validerings-macro-F1. Den forbinder
+historikfilerne med beslutningen i tuning_results.csv. Se afsnit 15 og 17.
+
+TEST: HVAD KAN DEN VALGTE MODEL?
+
+results/per_class_metrics.csv
+Precision, recall, specificitet, F1, AUC og support for hver klasse.
+Læs den sammen med begrebsforklaringerne i afsnit 19 og 20.
+
+results/confusion_matrices.png
+Alle kombinationer af sand og forudsagt klasse i antal og andele. Brug
+den til at se, hvilke klasser der forveksles. Se regneeksempler i afsnit 21.
+
+results/roc_curves.png
+Rangordning af hver klasse mod resten og deres AUC-værdier. Den viser
+en anden egenskab end korrekt argmax-klassifikation. Se afsnit 20.
+
+results/misclassified_examples.png
+Op til to konkrete fejl pr. sand klasse med labels og softmax-score.
+Et visuelt supplement til confusion matrix, forklaret i afsnit 21.
+
+results/test_predictions.csv
+Alle 2.005 testudfald med labels og syv scores pr. billede. Det er
+grundlaget for testmål og fejlfigurer. Se kolonner og læseeksempel i afsnit 21.
+
+SAMLET DOKUMENTATION OG DEN GEMTE MODEL
+
+results/metrics.json
+Samler oplysninger under navngivne felter. config indeholder indstillinger,
+normalisering og versioner. tuning indeholder valideringssammenligningen.
+test er CNN'ens samlede testmål, og baseline er majoritetsbaselinens mål.
+per_class, class_distribution og confusion_matrix er de tilhørende
+klassetabeller og matrix. Åbn filen i en teksteditor og søg efter et af
+feltnavnene, når I vil finde et bestemt tal fra forklaringen.
+
+results/best_model.pt
+Den trænede models state_dict samt config fra det valgte checkpoint.
+state_dict indeholder de lærte vægtværdier og blandt andet BatchNorms
+gemte statistik. Config beskriver, hvordan modellen blev sat op. Filen
+er binær, så den læses gennem PyTorch frem for som almindelig tekst.
+
+Checkpointet er fra learning rate 0,001 ved epoch 28. Det er hverken
+kontrolmodellen på 28 billeder, den anden kandidat eller blot den sidste
+træningstilstand ved epoch 30. Ved genbrug oprettes samme SimpleCNN,
+state_dict indlæses, og de gemte mean/std og labels anvendes. Brug
+model.eval() og billeder med tre RGB-kanaler og den forventede størrelse.
+Filen har ikke optimizer-state til nøjagtig genoptagelse af træning.
+Notebooken evaluerer benchmarkbilleder, ikke vilkårlige mobilfotos.
+
+FORSLAG TIL JERES GENNEMGANG
+
+1) Åbn datafordeling og træningseksempler: Hvad lærer modellen fra?
+2) Følg architecture.csv og afsnit 9: Hvad sker der med et billede?
+3) Læs tuning_results.csv og de to træningsfigurer: Hvordan valgte vi model?
+4) Læs test og baseline i metrics.json: Hvad er det samlede resultat?
+5) Sammenhold per_class_metrics.csv, confusion matrices og fejlfiguren:
+   Hvilke klasser er svære, og hvilke fejl skjules af samlet accuracy?
+6) Følg en konkret række i test_predictions.csv som i afsnit 21:
+   Hvordan bliver scores for ét billede til en klassifikation og en fejl?
+
+CSV-filerne bruger komma mellem felter og punktum som decimaltegn. Den
+første linje indeholder kolonnenavne. En værdi på 0.4808 betyder her det
+samme som 0,4808 i denne danske tekst. Hvis en CSV vises som én kolonne
+i et regneark, skal den importeres med komma som feltseparator. Der er
+anførselstegn omkring felter, der selv indeholder kommaer, som output_shape.
+
+PNG-figurerne kan bruges i rapport og fremlæggelse. Kreditér DermaMNIST og
+HAM10000 ved billedbrug; datasættets licens er CC BY-NC 4.0. Ved en ny
+kørsel kan tal og figurer blive overskrevet. Tekstforklaringerne og deres
+eksempler gælder den medfølgende kørsel og opdateres ikke automatisk.
+
+23. DEN KONKRETE KØRSEL OG HVAD DEN VISER
+
+Kørslen brugte CPU og Python 3.11.16. Kontrolmodellen lærte alle 28 billeder
+korrekt, og initialt uvægtet tab var 1,9402 mod referenceværdien ln(7) = 1,9459.
+
+Learning rate 0,001 kørte 30 epochs. Bedste epoch var 28 med validerings-
+macro-F1 0,4552. Learning rate 0,0003 stoppede efter 20 epochs; bedste epoch
+var 12 med macro-F1 0,4017. Kandidaten med 0,001 blev derfor valgt før testen.
+Træning af de to kandidater tog samlet cirka 340 sekunder i denne kørsel.
+
+På 2.005 testbilleder fik CNN'en accuracy 0,6095, balanced accuracy 0,5972,
+macro-F1 0,4808, macro-AUC 0,9132 og kappa 0,4157. Majoritetsbaseline fik
+accuracy 0,6688, balanced accuracy 0,1429 og macro-F1 0,1145.
+
+CNN'en slår altså ikke baselinen på accuracy. Den er langt bedre på de
+to mål, som giver hver klasse samme vægt. Det er en reel afvejning, og
+rapporten konkluderer derfor ikke, at modellen er bedst på alle mål.
+
+Nv -> mel var den hyppigste forveksling med 274 billeder. Mel-recall var
+0,6771, men mel-precision kun 0,3186. Modellen finder således en del mel-
+billeder, men giver også mange falske mel-forudsigelser. Df havde kun
+23 testbilleder og precision 0,0965, så dens resultat er både svagt og
+følsomt over for få ændringer. Se fulde tal og matrix i Rapport.md.
+I kan også gå direkte til results/per_class_metrics.csv og
+results/confusion_matrices.png og følge regneeksemplerne i afsnit 19 og 21.
+
+Vi træner ikke videre efter disse testresultater for at få pænere tal.
+En ændret model ville være et nyt forsøg, som skulle planlægges og vælges
+på valideringsdata med en passende strategi for en ny uafhængig evaluering.
+
+24. LITTERATUR OG MULIGE FORBEDRINGER
+
+MedMNISTs publicerede ResNet-18-reference ved 28 x 28 har accuracy 0,735
+og AUC 0,917. Det er litteraturtal, ikke en ResNet trænet i denne notebook.
+Det omtales som benchmarkreference, ikke som aktuel state of the art.
+Vores mindre model, træningsbudget og udvælgelse efter macro-F1 er anderledes.
+Tallene udgør derfor ikke en kontrolleret arkitektursammenligning.
+
+Et næste forsøg kunne bruge læsionsadskilt eller ekstern test for bedre at
+undersøge generalisering. Flere seeds kan vise variation. Et forsøg med og
+uden klassevægte kan isolere deres effekt på accuracy og minoritets-recall.
+En tilsvarende ablation kan undersøge augmentation. Det er ikke allerede
+dokumenteret af denne kørsel, hvor metoderne anvendes sammen.
+
+Højere oprindelig opløsning eller en lille prætrænet model kan undersøges
+med faste valideringsregler. De kan måske hjælpe på fine strukturer, men
+kræver mere beregning og kan øge overfitting. Forslagene er fremtidigt arbejde,
+ikke forbedringer som vores resultater allerede har bevist.
+
+25. SAMMENHÆNGEN MED UNDERVISNINGEN
+
+Fra kNN og lineære klassifikatorer videreføres dataopdeling, valideringsvalg
+og sammenligning med en simpel baseline. Vi sammenligner ikke direkte med
+Assignment 1s BloodMNIST-tal, da datasæt og klasser er forskellige.
+
+Fra neurale netværk videreføres forward pass, tab, gradienter, backpropagation,
+learning rate, batches og regularisering. PyTorch automatiserer gradient-
+beregningen, men gradienterne har samme rolle som i en manuel implementering.
+
+Fra CNN-undervisning bruges lokale filtre, delte vægte, feature maps,
+ReLU, pooling og global pooling. Arkitekturtabellen følger tensorstørrelser
+og parameterantal. Fra evaluering bruges confusion matrix, sensitivitet,
+specificitet, precision, F1 og ROC-AUC. Klasseubalancen gør målene nødvendige
+for at forstå, hvad modellen faktisk kan.
+
+26. KILDER
+
+Udleveret Assignment 2 description.docx: opgave og rapportstruktur.
+Udleveret Deeplearning Assignment 1.pdf: masterguide og metodebaggrund.
+
+Yang et al. (2023). MedMNIST v2—A large-scale lightweight benchmark for
+2D and 3D biomedical image classification. Scientific Data 10, 41.
+https://doi.org/10.1038/s41597-022-01721-8
+Officielt datasæt og benchmark: https://medmnist.com/
+
+Tschandl, Rosendahl og Kittler (2018). The HAM10000 dataset, a large collection
+of multi-source dermatoscopic images of common pigmented skin lesions.
+Scientific Data 5, 180161. https://doi.org/10.1038/sdata.2018.161
+
+Abhishek, Jain og Hamarneh (2025). Investigating the Quality of DermaMNIST
+and Fitzpatrick17k Dermatological Image Datasets. Scientific Data 12, 196.
+https://doi.org/10.1038/s41597-025-04382-5
+
+PyTorch: vægtet cross-entropy og reduktion.
+https://docs.pytorch.org/docs/2.14/generated/torch.nn.CrossEntropyLoss.html
+
+Kilderne er kontrolleret den 10. november 2026. Egen kørsels resultater
+dokumenteres særskilt i results/ og fortolkes i Rapport.md.

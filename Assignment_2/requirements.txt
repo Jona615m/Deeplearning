@@ -1,0 +1,7 @@
+medmnist==3.0.2
+torch>=2.2
+torchvision>=0.17
+numpy>=1.26
+matplotlib>=3.8
+scikit-learn>=1.4
+ipykernel>=6.29
